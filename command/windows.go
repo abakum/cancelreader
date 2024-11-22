@@ -8,16 +8,6 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// можно импортировать любые модули
-
-const (
-	arg0 = "cmd"
-	arg1 = "/c"
-	// arg0 = "powershell"
-	// arg1 = "-command"
-	arg2 = "pause"
-)
-
 func ConsoleCP(once *bool) {
 	if *once {
 		return

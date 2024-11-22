@@ -6,7 +6,9 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
+	"time"
 
 	"github.com/abakum/cancelreader"
 	"github.com/containerd/console"
@@ -20,6 +22,9 @@ func main() {
 		once  bool
 		reset = func(*bool) {}
 		cmd   *exec.Cmd
+		arg0  = "bash"
+		arg1  = "-c"
+		arg2  = "echo Press any key to continue . . .;read -rn1"
 	)
 
 	defer func() {
@@ -28,6 +33,14 @@ func main() {
 	}()
 	if isatty.IsCygwinTerminal(os.Stdin.Fd()) {
 		ConsoleCP(&once)
+	} else if runtime.GOOS == "windows" {
+		arg0 = "cmd"
+		arg1 = "/c"
+
+		// arg0 = "powershell"
+		// arg1 = "-command"
+
+		arg2 = "pause"
 	}
 	log.SetFlags(log.Lmicroseconds | log.Lshortfile)
 	log.SetPrefix("\r")
@@ -42,7 +55,7 @@ func main() {
 		log.Println(cmd)
 		if i < 4 {
 			// <Esc> <Esc> exit<Enter> exit<Enter>
-			log.Println("without pipes")
+			log.Println("--without pipes", i)
 			cmd.Stdin = os.Stdin
 			cmd.Stdout = os.Stdout
 			fmt.Print("\r")
@@ -52,7 +65,7 @@ func main() {
 			cmd.Run()
 		} else {
 			// <Esc> <Esc> exit<Enter> exit<Enter>
-			log.Println("with pipes")
+			log.Println("--with pipes", i)
 			ConsoleCP(&once)
 
 			in, err := cmd.StdinPipe()
@@ -84,12 +97,14 @@ func main() {
 			}()
 			io.Copy(os.Stdout, out)
 			log.Println("Stdout done", i)
-			log.Println("Cancel stdin", i, cr.Cancel())
+			log.Println("Cancel read stdin", i, cr.Cancel())
 
 			cmd.Process.Release()
 			cr.Close()
 		}
 	}
+	time.Sleep(time.Millisecond)
+
 }
 
 func setRaw(raw *bool, old func(*bool)) (reset func(*bool)) {
