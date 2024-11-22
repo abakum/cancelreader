@@ -37,10 +37,10 @@ func NewReader(reader io.Reader) (CancelReader, error) {
 		return nil, fmt.Errorf("open CONIN$ in overlapping mode: %w", err)
 	}
 
-	resetConsole, err := prepareConsole(conin)
-	if err != nil {
-		return nil, fmt.Errorf("prepare console: %w", err)
-	}
+	// resetConsole, err := prepareConsole(conin)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("prepare console: %w", err)
+	// }
 
 	// flush input, otherwise it can contain events which trigger
 	// WaitForMultipleObjects but which ReadFile cannot read, resulting in an
@@ -56,9 +56,9 @@ func NewReader(reader io.Reader) (CancelReader, error) {
 	}
 
 	return &winCancelReader{
-		conin:              conin,
-		cancelEvent:        cancelEvent,
-		resetConsole:       resetConsole,
+		conin:       conin,
+		cancelEvent: cancelEvent,
+		// resetConsole:       resetConsole,
 		blockingReadSignal: make(chan struct{}, 1),
 	}, nil
 }
@@ -68,7 +68,7 @@ type winCancelReader struct {
 	cancelEvent windows.Handle
 	cancelMixin
 
-	resetConsole       func() error
+	// resetConsole       func() error
 	blockingReadSignal chan struct{}
 }
 
@@ -121,10 +121,10 @@ func (r *winCancelReader) Close() error {
 		return fmt.Errorf("closing cancel event handle: %w", err)
 	}
 
-	err = r.resetConsole()
-	if err != nil {
-		return err
-	}
+	// err = r.resetConsole()
+	// if err != nil {
+	// 	return err
+	// }
 
 	err = windows.Close(r.conin)
 	if err != nil {
