@@ -4,6 +4,7 @@
 package cancelreader
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -23,7 +24,7 @@ var fileShareValidFlags uint32 = 0x00000007
 // not a File with the same file descriptor as os.Stdin, the cancel
 // function does nothing and always returns false. The Windows implementation
 // is based on WaitForMultipleObject with overlapping reads from CONIN$.
-func NewReader(reader io.Reader) (CancelReader, error) {
+func NewReader(reader io.Reader, prepare ...func(input uintptr) (reset func() error, err error)) (CancelReader, error) {
 	if f, ok := reader.(File); !ok || f.Fd() != os.Stdin.Fd() {
 		return newFallbackCancelReader(reader)
 	}
@@ -37,10 +38,16 @@ func NewReader(reader io.Reader) (CancelReader, error) {
 		return nil, fmt.Errorf("open CONIN$ in overlapping mode: %w", err)
 	}
 
-	// resetConsole, err := prepareConsole(conin)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("prepare console: %w", err)
-	// }
+	resetConsole := func() error { return nil }
+	if len(prepare) == 0 {
+		prepare = append(prepare, PrepareConsole)
+	}
+	if prepare[0] != nil {
+		resetConsole, err = prepare[0](uintptr(conin))
+		if err != nil {
+			return nil, fmt.Errorf("prepare console: %w", err)
+		}
+	}
 
 	// flush input, otherwise it can contain events which trigger
 	// WaitForMultipleObjects but which ReadFile cannot read, resulting in an
@@ -56,9 +63,9 @@ func NewReader(reader io.Reader) (CancelReader, error) {
 	}
 
 	return &winCancelReader{
-		conin:       conin,
-		cancelEvent: cancelEvent,
-		// resetConsole:       resetConsole,
+		conin:              conin,
+		cancelEvent:        cancelEvent,
+		resetConsole:       resetConsole,
 		blockingReadSignal: make(chan struct{}, 1),
 	}, nil
 }
@@ -68,7 +75,7 @@ type winCancelReader struct {
 	cancelEvent windows.Handle
 	cancelMixin
 
-	// resetConsole       func() error
+	resetConsole       func() error
 	blockingReadSignal chan struct{}
 }
 
@@ -116,22 +123,21 @@ func (r *winCancelReader) Cancel() bool {
 }
 
 func (r *winCancelReader) Close() error {
-	err := windows.CloseHandle(r.cancelEvent)
-	if err != nil {
-		return fmt.Errorf("closing cancel event handle: %w", err)
+	var e1, e2, e3 error
+
+	if err := windows.CloseHandle(r.cancelEvent); err != nil {
+		e1 = fmt.Errorf("closing cancel event handle: %w", err)
 	}
 
-	// err = r.resetConsole()
-	// if err != nil {
-	// 	return err
-	// }
-
-	err = windows.Close(r.conin)
-	if err != nil {
-		return fmt.Errorf("closing CONIN$")
+	if err := r.resetConsole(); err != nil {
+		e2 = fmt.Errorf("reset console: %w", err)
 	}
 
-	return nil
+	if err := windows.Close(r.conin); err != nil {
+		e3 = fmt.Errorf("closing CONIN$: %w", err)
+	}
+
+	return errors.Join(e1, e2, e3)
 }
 
 func (r *winCancelReader) wait() error {
@@ -186,7 +192,8 @@ func (r *winCancelReader) readAsync(data []byte) (int, error) {
 	return int(n), nil
 }
 
-func prepareConsole(input windows.Handle) (reset func() error, err error) {
+func PrepareConsole(uinput uintptr) (reset func() error, err error) {
+	input := windows.Handle(uinput)
 	var originalMode uint32
 
 	err = windows.GetConsoleMode(input, &originalMode)

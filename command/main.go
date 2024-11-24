@@ -17,20 +17,22 @@ import (
 
 func main() {
 	var (
-		raw   bool
-		once  bool
-		reset = func(*bool) {}
-		cmd   *exec.Cmd
-		arg0  = "bash"
-		arg1  = "-c"
-		arg2  = "echo Press any key to continue . . .;read -rn1"
+		// raw   bool
+		once bool
+		// reset = func(*bool) {}
+		cmd  *exec.Cmd
+		arg0 = "bash"
+		arg1 = "-c"
+		arg2 = "echo Press any key to continue . . .;read -rn1"
 	)
 
+	resetMode := consoleMode()
 	defer func() {
-		reset(&raw)
+		// reset(&raw)
+		resetMode()
 		closer.Close()
 	}()
-	if isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+	if IsCygwinTerminal(os.Stdin.Fd()) {
 		ConsoleCP(&once)
 	} else if runtime.GOOS == "windows" {
 		arg0 = "cmd"
@@ -43,12 +45,27 @@ func main() {
 	}
 	log.SetFlags(log.Lmicroseconds | log.Lshortfile)
 	log.SetPrefix("\r")
+
+	var (
+		cr  cancelreader.CancelReader
+		err error
+	)
+
 	for i := 0; i < 8; i++ {
 		if i%4 > 1 {
-			reset(&raw)
+			// reset(&raw)
+			resetMode()
+			cr, err = cancelreader.NewReader(os.Stdin, nil)
+			if err != nil {
+				panic(err)
+			}
 			cmd = exec.Command(arg0)
 		} else {
-			reset = setRaw(&raw, reset)
+			// reset = setRaw(&raw, reset)
+			cr, err = cancelreader.NewReader(os.Stdin, prepareConsole)
+			if err != nil {
+				panic(err)
+			}
 			cmd = exec.Command(arg0, arg1, arg2)
 		}
 		log.Println(cmd)
@@ -86,10 +103,6 @@ func main() {
 				panic(err)
 			}
 
-			cr, err := cancelreader.NewReader(os.Stdin)
-			if err != nil {
-				panic(err)
-			}
 			go func() {
 				_, err = io.Copy(os.Stdout, out)
 				log.Println("Stdout done", i, err)
@@ -104,7 +117,6 @@ func main() {
 		}
 	}
 }
-
 func setRaw(raw *bool, old func(*bool)) (reset func(*bool)) {
 	reset = old
 	if *raw {
@@ -174,5 +186,6 @@ func sttySettings() (string, error) {
 func sttyReset(settings string) {
 	cmd := exec.Command("stty", settings)
 	cmd.Stdin = os.Stdin
-	_ = cmd.Run()
+	err := cmd.Run()
+	log.Println("sttyReset", settings, err)
 }
