@@ -8,7 +8,6 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/abakum/cancelreader"
 	"github.com/containerd/console"
@@ -92,19 +91,18 @@ func main() {
 				panic(err)
 			}
 			go func() {
-				defer log.Println("Stdin done", i)
-				io.Copy(in, cr)
+				_, err = io.Copy(os.Stdout, out)
+				log.Println("Stdout done", i, err)
+				log.Println("Cancel read stdin", i, cr.Cancel())
 			}()
-			io.Copy(os.Stdout, out)
-			log.Println("Stdout done", i)
-			log.Println("Cancel read stdin", i, cr.Cancel())
 
-			cmd.Process.Release()
-			cr.Close()
+			_, err = io.Copy(in, cr)
+			log.Println("Stdin done", i, err)
+
+			log.Println("Wait", cmd.Wait())
+			log.Println("Close", cr.Close())
 		}
 	}
-	time.Sleep(time.Millisecond)
-
 }
 
 func setRaw(raw *bool, old func(*bool)) (reset func(*bool)) {
