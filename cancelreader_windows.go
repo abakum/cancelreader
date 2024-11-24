@@ -24,7 +24,7 @@ var fileShareValidFlags uint32 = 0x00000007
 // not a File with the same file descriptor as os.Stdin, the cancel
 // function does nothing and always returns false. The Windows implementation
 // is based on WaitForMultipleObject with overlapping reads from CONIN$.
-func NewReader(reader io.Reader, prepare ...func(input uintptr) (reset func() error, err error)) (CancelReader, error) {
+func NewReader(reader io.Reader) (CancelReader, error) {
 	if f, ok := reader.(File); !ok || f.Fd() != os.Stdin.Fd() {
 		return newFallbackCancelReader(reader)
 	}
@@ -36,17 +36,6 @@ func NewReader(reader io.Reader, prepare ...func(input uintptr) (reset func() er
 		fileShareValidFlags, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OVERLAPPED, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open CONIN$ in overlapping mode: %w", err)
-	}
-
-	resetConsole := func() error { return nil }
-	if len(prepare) == 0 {
-		prepare = append(prepare, PrepareConsole)
-	}
-	if prepare[0] != nil {
-		resetConsole, err = prepare[0](uintptr(conin))
-		if err != nil {
-			return nil, fmt.Errorf("prepare console: %w", err)
-		}
 	}
 
 	// flush input, otherwise it can contain events which trigger
@@ -65,7 +54,6 @@ func NewReader(reader io.Reader, prepare ...func(input uintptr) (reset func() er
 	return &winCancelReader{
 		conin:              conin,
 		cancelEvent:        cancelEvent,
-		resetConsole:       resetConsole,
 		blockingReadSignal: make(chan struct{}, 1),
 	}, nil
 }
@@ -75,7 +63,6 @@ type winCancelReader struct {
 	cancelEvent windows.Handle
 	cancelMixin
 
-	resetConsole       func() error
 	blockingReadSignal chan struct{}
 }
 
@@ -123,21 +110,17 @@ func (r *winCancelReader) Cancel() bool {
 }
 
 func (r *winCancelReader) Close() error {
-	var e1, e2, e3 error
+	var e1, e2 error
 
 	if err := windows.CloseHandle(r.cancelEvent); err != nil {
 		e1 = fmt.Errorf("closing cancel event handle: %w", err)
 	}
 
-	if err := r.resetConsole(); err != nil {
-		e2 = fmt.Errorf("reset console: %w", err)
-	}
-
 	if err := windows.Close(r.conin); err != nil {
-		e3 = fmt.Errorf("closing CONIN$: %w", err)
+		e2 = fmt.Errorf("closing CONIN$: %w", err)
 	}
 
-	return errors.Join(e1, e2, e3)
+	return errors.Join(e1, e2)
 }
 
 func (r *winCancelReader) wait() error {
@@ -190,49 +173,6 @@ func (r *winCancelReader) readAsync(data []byte) (int, error) {
 	<-r.blockingReadSignal
 
 	return int(n), nil
-}
-
-func PrepareConsole(uinput uintptr) (reset func() error, err error) {
-	input := windows.Handle(uinput)
-	var originalMode uint32
-
-	err = windows.GetConsoleMode(input, &originalMode)
-	if err != nil {
-		return nil, fmt.Errorf("get console mode: %w", err)
-	}
-
-	var newMode uint32
-	newMode &^= windows.ENABLE_ECHO_INPUT
-	newMode &^= windows.ENABLE_LINE_INPUT
-	newMode &^= windows.ENABLE_MOUSE_INPUT
-	newMode &^= windows.ENABLE_WINDOW_INPUT
-	newMode &^= windows.ENABLE_PROCESSED_INPUT
-
-	newMode |= windows.ENABLE_EXTENDED_FLAGS
-	newMode |= windows.ENABLE_INSERT_MODE
-	newMode |= windows.ENABLE_QUICK_EDIT_MODE
-
-	// Enabling virtual terminal input is necessary for processing certain
-	// types of input like X10 mouse events and arrows keys with the current
-	// bytes-based input reader. It does, however, prevent cancelReader from
-	// being able to cancel input. The planned solution for this is to read
-	// Windows events in a more native fashion, rather than the current simple
-	// bytes-based input reader which works well on unix systems.
-	newMode |= windows.ENABLE_VIRTUAL_TERMINAL_INPUT
-
-	err = windows.SetConsoleMode(input, newMode)
-	if err != nil {
-		return nil, fmt.Errorf("set console mode: %w", err)
-	}
-
-	return func() error {
-		err := windows.SetConsoleMode(input, originalMode)
-		if err != nil {
-			return fmt.Errorf("reset console mode: %w", err)
-		}
-
-		return nil
-	}, nil
 }
 
 var (

@@ -18,7 +18,7 @@ import (
 // successfully. If the input reader is not a File, the cancel function
 // does nothing and always returns false. The Linux implementation is based on
 // the epoll mechanism.
-func NewReader(reader io.Reader, _ ...func(input uintptr) (reset func() error, err error)) (CancelReader, error) {
+func NewReader(reader io.Reader) (CancelReader, error) {
 	file, ok := reader.(File)
 	if !ok {
 		return newFallbackCancelReader(reader)

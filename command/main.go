@@ -17,19 +17,17 @@ import (
 
 func main() {
 	var (
-		// raw   bool
-		once bool
-		// reset = func(*bool) {}
-		cmd  *exec.Cmd
-		arg0 = "bash"
-		arg1 = "-c"
-		arg2 = "echo Press any key to continue . . .;read -rn1"
+		raw   bool
+		once  bool
+		reset = func(*bool) {}
+		cmd   *exec.Cmd
+		arg0  = "bash"
+		arg1  = "-c"
+		arg2  = "echo Press any key to continue . . .;read -rn1"
 	)
 
-	resetMode := consoleMode()
 	defer func() {
-		// reset(&raw)
-		resetMode()
+		reset(&raw)
 		closer.Close()
 	}()
 	if IsCygwinTerminal(os.Stdin.Fd()) {
@@ -53,22 +51,18 @@ func main() {
 
 	for i := 0; i < 8; i++ {
 		if i%4 > 1 {
-			// reset(&raw)
-			resetMode()
-			cr, err = cancelreader.NewReader(os.Stdin, nil)
-			if err != nil {
-				panic(err)
-			}
+			reset(&raw)
 			cmd = exec.Command(arg0)
 		} else {
-			// reset = setRaw(&raw, reset)
-			cr, err = cancelreader.NewReader(os.Stdin, prepareConsole)
-			if err != nil {
-				panic(err)
-			}
+			reset = setRaw(&raw, reset)
 			cmd = exec.Command(arg0, arg1, arg2)
 		}
 		log.Println(cmd)
+		cr, err = cancelreader.NewReader(os.Stdin)
+		if err != nil {
+			panic(err)
+		}
+
 		if i < 4 {
 			// <Esc> <Esc> exit<Enter> exit<Enter>
 			log.Println("--without pipes", i)
